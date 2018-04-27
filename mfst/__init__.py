@@ -280,9 +280,12 @@ class FST(object):
         ret = []
 
         if self._string_mapper:
-            mapper = self._string_mapper
+            if isinstance(self._string_mapper, tuple):
+                mapper_o = self._string_mapper[1]
+            else:
+                mapper_o = self._string_mapper
         else:
-            mapper = lambda x: x
+            mapper_o = lambda x: x
 
         while state != -1:
             edges = list(self.get_arcs(state))
@@ -290,12 +293,12 @@ class FST(object):
                 raise RuntimeError("FST does not contain exactly one path")
             l = edges[0].output_label
             if l != 0:  # the epsilon state
-                ret.append(mapper(l))
+                ret.append(mapper_o(l))
             if edges[0].nextstate in seen:
                 raise RuntimeError("FST contains cycle")
             seen.add(state)
             state = edges[0].nextstate
-        if mapper is chr:
+        if mapper_o is chr:
             return ''.join(ret)
         return ret
 
@@ -770,13 +773,21 @@ class FST(object):
 
         zero = self.semiring_zero
         if self._string_mapper is None:
-            mapper = lambda x: x
+            mapper_i = lambda x: x
+            mapper_o = mapper_i
+        elif isinstance(self._string_mapper, tuple):
+            mapper_i = lambda x: ''.join([self._string_mapper[0](y) for y in x])
+            mapper_o = lambda x: ''.join([self._string_mapper[1](y) for y in x])
         elif self._string_mapper is chr:
             def mapper(x):
                 return ''.join([chr(y) for y in x])
+            mapper_i = mapper
+            mapper_o = mapper
         else:
             def mapper(x):
                 return tuple([self._string_mapper(y) for y in x])
+            mapper_i = mapper
+            mapper_o = mapper
 
         # run BFS
         queue = [(tuple(), tuple(), self.semiring_one, start)]
@@ -787,7 +798,7 @@ class FST(object):
                 if zero != weight:
                     if nextstate == -1:
                         # this is a final state
-                        yield PathType(mapper(input_path), mapper(output_path), sweight * weight)
+                        yield PathType(mapper_i(input_path), mapper_o(output_path), sweight * weight)
                     else:
                         ip = input_path
                         op = output_path
@@ -857,7 +868,15 @@ class FST(object):
 
         if self._string_mapper:
             if self._string_mapper is chr:
-                def make_label(x):
+                def make_label_i(x):
+                    if x == 32:
+                        return '(spc)'
+                    elif x < 32:
+                        return str(x)
+                    else:
+                        return chr(x)
+
+                def make_label_o(x):
                     if x == 32:
                         return '(spc)'
                     elif x < 32:
@@ -865,9 +884,15 @@ class FST(object):
                     else:
                         return chr(x)
             else:
-                make_label = self._string_mapper
+                if isinstance(self._string_mapper, tuple):
+                    make_label_i = self._string_mapper[0]
+                    make_label_o = self._string_mapper[1]
+                else:
+                    make_label_i = self._string_mapper
+                    make_label_o = self._string_mapper
         else:
-            make_label = str
+            make_label_i = str
+            make_label_o = str
 
         for sid in range(self.num_states):
             to = defaultdict(list)
@@ -879,13 +904,13 @@ class FST(object):
                 if arc.input_label == 0:
                     label += '\u03B5'  # epsilon
                 else:
-                    label += make_label(arc.input_label)
+                    label += make_label_i(arc.input_label)
                 if arc.input_label != arc.output_label:
                     label += ':'
                     if arc.output_label == 0:
                         label += '\u03B5'
                     else:
-                        label += make_label(arc.output_label)
+                        label += make_label_o(arc.output_label)
                 if one != arc.weight:
                     label += f'/{arc.weight}'
                 to[arc.nextstate].append(label)
